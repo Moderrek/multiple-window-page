@@ -1,0 +1,190 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Local Storage Example</title>
+    <style>
+      html, body {
+        margin: 0 !important;
+        padding: 0 !important;
+      }
+    </style>
+  </head>
+  <body>
+    <canvas id="canvas"></canvas>
+    <script>
+      const DEBUG_MODE = true; // for debugging process
+      let running = false;
+      let current_window = undefined;
+      let current_data = undefined;
+      let canvas = undefined;
+      let timestamp = 0;
+      let previousTimestamp = 0;
+      let deltaTime = 0;
+      let context = undefined;
+      let global_center = undefined;
+
+      // Events
+      const onLoad = () => {
+        // Setup html elements
+        // Setup rendering context
+        canvas = document.getElementById("canvas")
+        canvas.width = window.innerWidth;
+        canvas.height = window.innerHeight;
+        context = canvas.getContext('2d');
+        global_center = makeVec2(screen.availWidth / 2, screen.availHeight / 2)
+        // Setup unique id for current window
+        current_window = createWindowId();
+        debug(`My id = ${current_window}`);
+        // Start main loop
+        running = true;
+        window.requestAnimationFrame(mainLoop);
+      };
+
+      const update = () => {
+        // Update windows data
+        if (!current_data || getWindows().get(current_window) != current_data) {
+          current_data = createWindowData();
+          let windows = getWindows();
+          windows.set(`${current_window}`, current_data);
+          setWindows(windows);
+        }
+        // Render image
+        draw();
+      };
+
+      const localToGlobalTransformation = (vec2) => {
+        return makeVec2(vec2.x + window.screenX, vec2.y + window.screenY);
+      }
+
+      const globalToLocalTransformation = (vec2) => {
+        return makeVec2(vec2.x - window.screenX, vec2.y - window.screenY);
+      }
+
+      const makeVec2 = (x, y) => {
+        return { x: x, y: y };
+      }
+
+      const drawGlobalSpaceRect = (x, y, wx, wh) => {
+        let globalSpace = globalToLocalTransformation(makeVec2(x, y));
+        context.fillRect(globalSpace.x, globalSpace.y, wx, wh);
+      }
+
+      const drawGlobalSpaceLine = (x, y, tx, ty) => {
+        let anchor = globalToLocalTransformation(makeVec2(x, y));
+        let dest = globalToLocalTransformation(makeVec2(tx, ty));
+        context.beginPath();
+        context.moveTo(anchor.x, anchor.y);
+        context.lineTo(dest.x, dest.y);
+        context.stroke();
+      }
+
+      const draw = () => {
+        // Pisząc tą linie, właśnie dowiedziałem się,
+        // że w tak prostym przykładzie nie potrzeba używać localstorage :)
+        context.fillStyle = "#FFFFFF";
+        context.fillRect(0, 0, canvas.width, canvas.height)
+        // Draw global space rectangle
+        context.fillStyle = "#000000";
+        drawGlobalSpaceRect(200, 200, 200, 500);
+        drawGlobalSpaceRect(1600, 500, 150, 150);
+        drawGlobalSpaceRect(0, 0, 100, 500);
+        drawGlobalSpaceRect(global_center.x, global_center.y, 250, 50);
+        drawGlobalSpaceRect(global_center.x + 50, global_center.y, 10, 20);
+        // Connect windows
+        // windows.forEach((data, id) => {
+        //   if (id == current_window) return;
+        //   drawGlobalSpaceLine(current_data.x + current_data.w / 2, current_data.y + current_data.h / 2, data.x + data.w / 2, data.y + data.h / 2);
+        // });
+        let windows = getWindows();
+        windows.forEach((start_data, start_id) => {
+          if (!start_data) return;
+          windows.forEach((end_data, end_id) => {
+            if (!end_data) return;
+            drawGlobalSpaceLine(start_data.x + start_data.w / 2, start_data.y + start_data.h / 2, end_data.x + end_data.w / 2, end_data.y + end_data.h / 2);
+          });
+        });
+      }
+
+      const mainLoop = (timestamp) => {
+        // Calculate delta time
+        let deltaTime = timestamp - previousTimestamp;
+        previousTimestamp = timestamp;
+        // Do loop
+        update();
+        // Continue main loop
+        if (running)
+          window.requestAnimationFrame(mainLoop);
+      };
+
+      const onUnload = () => {
+        running = false;
+        removeWindow(current_window);
+        freeIds();
+      };
+
+      const onResize = () => {
+        canvas.width = window.innerWidth;
+        canvas.height = window.innerHeight;
+        debug("Window resized");
+      }
+
+      // Utils
+
+      const debug = (message) => {
+        if (DEBUG_MODE) console.log("DEBUG | ", message)
+      }
+
+      const createWindowId = () => {
+        let id = parseInt(localStorage.getItem("window-id")) || 0;
+        localStorage.setItem("window-id", `${id + 1}`);
+        return id;
+      };
+
+      const getCurrentHighestId = () => {
+        return parseInt(localStorage.getItem("window-id")) || 0;
+      };
+
+      const removeWindow = (id) => {
+        let windows = getWindows();
+        windows[`${id}`] = undefined;
+        windows.delete(`${id}`);
+        setWindows(windows);
+        return windows;
+      };
+
+      const freeIds = () => {
+        let id = getCurrentHighestId();
+        let idPoll = id + 1;
+        let windows = getWindows();
+        for (let i = windows.size - 1; i >= 0; --i) {
+          if (!windows[`${i}`]) --idPoll;
+          else break;
+        }
+        localStorage.setItem("window-id", idPoll);
+      };
+
+      const createWindowData = () => {
+        return {
+          w: window.innerWidth,
+          h: window.innerHeight,
+          x: window.screenX,
+          y: window.screenY,
+        };
+      };
+
+      const getWindows = () => {
+        return new Map(Object.entries(JSON.parse(localStorage.getItem("windows") || '{}')));
+      };
+
+      const setWindows = (windows) => {
+        localStorage.setItem("windows", JSON.stringify(Object.fromEntries(windows)));
+      };
+
+      window.addEventListener("load", onLoad);
+      window.addEventListener("beforeunload", onUnload);
+      window.addEventListener("resize", onResize);
+    </script>
+  </body>
+</html>
